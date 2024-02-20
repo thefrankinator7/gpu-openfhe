@@ -1,0 +1,3 @@
+/home/rossif/hip_kernels/build/CMakeFiles/gpu_funcs.dir
+/home/rossif/hip_kernels/build/CMakeFiles/edit_cache.dir
+/home/rossif/hip_kernels/build/CMakeFiles/rebuild_cache.dir

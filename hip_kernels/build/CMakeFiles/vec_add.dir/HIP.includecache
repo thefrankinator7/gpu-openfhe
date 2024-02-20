@@ -1,0 +1,20 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/rossif/hip_kernels/vec_add.hip
+stdio.h
+-
+cstdint
+-
+hip/hip_runtime.h
+/home/rossif/hip_kernels/hip/hip_runtime.h
+chrono
+-
+iostream
+-
+

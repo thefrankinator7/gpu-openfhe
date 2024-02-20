@@ -1,0 +1,72 @@
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: CMAKE_HIP_COMPILER-NOTFOUND 
+Build flags: 
+Id flags: -v 
+
+The output was:
+No such file or directory
+
+
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: CMAKE_HIP_COMPILER-NOTFOUND 
+Build flags: 
+Id flags:  
+
+The output was:
+No such file or directory
+
+
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: CMAKE_HIP_COMPILER-NOTFOUND 
+Build flags: 
+Id flags: -v 
+
+The output was:
+No such file or directory
+
+
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: CMAKE_HIP_COMPILER-NOTFOUND 
+Build flags: 
+Id flags:  
+
+The output was:
+No such file or directory
+
+
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: /opt/rocm/llvm/bin/clang++ 
+Build flags: 
+Id flags: -v 
+
+The output was:
+No such file or directory
+
+
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: /opt/rocm/llvm/bin/clang++ 
+Build flags: 
+Id flags:  
+
+The output was:
+No such file or directory
+
+
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: /opt/rocm/llvm/bin/clang++ 
+Build flags: 
+Id flags: -v 
+
+The output was:
+No such file or directory
+
+
+Compiling the HIP compiler identification source file "CMakeHIPCompilerId.hip" failed.
+Compiler: /opt/rocm/llvm/bin/clang++ 
+Build flags: 
+Id flags:  
+
+The output was:
+No such file or directory
+
+

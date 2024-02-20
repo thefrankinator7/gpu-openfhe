@@ -1,0 +1,2 @@
+/usr/bin/ar qc libvec_add.a CMakeFiles/vec_add.dir/vec_add.hip.o
+/usr/bin/ranlib libvec_add.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libgpu_funcs.a CMakeFiles/gpu_funcs.dir/gpu_functions.hip.o
+/usr/bin/ranlib libgpu_funcs.a
