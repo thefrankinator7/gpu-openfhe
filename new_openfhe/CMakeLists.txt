@@ -37,18 +37,13 @@ set(CXX_STANDARD_REQUIRED ON)
 set(MATHBACKEND 4)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 message(STATUS "Enabling HIP")
-#enable_language(HIP)
 find_package(hip REQUIRED)
 
-#include_directories("/home/rossif/hiptest/cmaketest")
-include_directories("/home/rossif/hip_kernels")
+include_directories("../hip_kernels")
 include_directories("/opt/rocm-5.6.0/include")
-##include_directories("/opt/rocm-5.6.0/hip")
-#set_source_files_properties(/home/rossif/openfhe/openfhe-development/src/core/include/lattice/hal/default/dcrtpoly-impl.h PROPERTIES LANGUAGE HIP)
-#link_libraries(hip::device)
+
 link_libraries(hip::host)
-#link_libraries("/home/rossif/hiptest/cmaketest/build/libvec_add.a")
-link_libraries("/home/rossif/hip_kernels/build/libgpu_funcs.a")
+link_libraries("${CMAKE_CURRENT_SOURCE_DIR}/../hip_kernels/build/libgpu_funcs.a")
 ###
 
 #--------------------------------------------------------------------
