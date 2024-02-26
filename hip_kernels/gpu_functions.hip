@@ -60,13 +60,30 @@ uint64_t* moveArrayToGPU(uint64_t* array, int n) {
     size_t bytes = n*sizeof(uint64_t);
     HIP_ASSERT(hipMalloc(&GPUArray, bytes));
     HIP_ASSERT(hipMemcpy(GPUArray, array, bytes, hipMemcpyHostToDevice));
+//    hipError_t status = hipMemcpy(GPUArray, array, bytes, hipMemcpyHostToDevice);
+//    if (status != hipSuccess) {
+//        std::cerr << "hipMemcpy failed: " << hipGetErrorString(status) << std::endl;
+//        // Handle error, possibly clean up resources
+//    }
     return GPUArray;
 }
 
 uint64_t* moveArrayToHost(uint64_t* GPUArray, int n) {
-    uint64_t* HostArray = new uint64_t[n]();
     size_t bytes = n*sizeof(uint64_t);
+    uint64_t* HostArray;
+    //hipError_t status1 = hipHostMalloc(&HostArray, bytes, hipHostMallocDefault);
+
+    //if (status1 != hipSuccess) {
+    //    std::cerr << "hipHostMalloc failed: " << hipGetErrorString(status1) << std::endl;
+    //}
+    HIP_ASSERT(hipHostMalloc(&HostArray, bytes, hipHostMallocDefault));
+
     HIP_ASSERT(hipMemcpy(HostArray, GPUArray, bytes, hipMemcpyDeviceToHost));
+    //hipError_t status = hipMemcpy(HostArray, GPUArray, bytes, hipMemcpyDeviceToHost);
+    //if (status != hipSuccess) {
+    //    std::cerr << "hipMemcpy failed: " << hipGetErrorString(status) << std::endl;
+    //    // Handle error, possibly clean up resources
+    //}
     return HostArray;
 }
 
