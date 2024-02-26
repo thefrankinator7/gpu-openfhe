@@ -56,33 +56,33 @@ struct RawCipherText {
   uint64_t* sub_0; // pointer to sub-ciphertext 0
   uint64_t* sub_1; // pointer to sub-ciphertext 1
   uint64_t* moduli; // moduli for each limb
-  int limbs; // number of limbs of ciphertext, length of moduli array and first dimension of sub-ciphertexts
+  int numRes; // number of residues of ciphertext, length of moduli array and first dimension of sub-ciphertexts
   int N; // length of each polynomial
-  bool format;
+  bool format; // current format of ciphertext, either coefficient or evaluation
 };
 
 uint64_t* GetRawArray(std::vector<lbcrypto::PolyImpl<lbcrypto::NativeVector>> polys) {
-    // total size is l * N
-    int numLimbs=polys.size();
+    // total size is r * N
+    int numRes=polys.size();
     int numElements=(*polys[0].m_values).GetLength();
-    auto totalSize = numLimbs * numElements;
+    auto totalSize = numRes * numElements;
     // Allocate array
     uint64_t* flattened = new uint64_t[totalSize];
 
     // Fill the array
-    for (int l=0;l<numLimbs;l++) {
+    for (int r=0;r < numRes;r++) {
       for (int i=0;i<numElements;i++) {
-            flattened[l * numElements + i] = (*polys[l].m_values)[i].ConvertToInt();
+            flattened[r * numElements + i] = (*polys[r].m_values)[i].ConvertToInt();
         }
     }
     return flattened;
 };
 
 uint64_t* GetModuli(std::vector<lbcrypto::PolyImpl<lbcrypto::NativeVector>> polys) {
-    int numLimbs=polys.size();
-    uint64_t* moduli=new uint64_t[numLimbs];
-    for (int l=0;l<numLimbs;l++) {
-        moduli[l]=polys[l].GetModulus().ConvertToInt();
+    int numRes=polys.size();
+    uint64_t* moduli=new uint64_t[numRes];
+    for (int r=0;r < numRes;r++) {
+        moduli[r]=polys[r].GetModulus().ConvertToInt();
     }
     return moduli;
 };
@@ -91,7 +91,7 @@ RawCipherText GetRawCipherText(CryptoContext<DCRTPoly> cc, Ciphertext<DCRTPoly> 
     RawCipherText result;
     result.cc=cc;
     result.originalCipherText=ct;
-    result.limbs=ct->GetElements()[0].GetAllElements().size();
+    result.numRes=ct->GetElements()[0].GetAllElements().size();
     result.N=(*(ct->GetElements()[0].GetAllElements())[0].m_values).GetLength();
     result.sub_0 = GetRawArray(ct->GetElements()[0].GetAllElements());
     result.sub_1 = GetRawArray(ct->GetElements()[1].GetAllElements());
@@ -107,10 +107,10 @@ Ciphertext<DCRTPoly> GetOpenFHECipherText(RawCipherText ct) {
     auto sub_1=result->GetElements()[1];
     auto dcrt_0=sub_0.GetAllElements();
     auto dcrt_1=sub_1.GetAllElements();
-    for (int l=0;l<ct.limbs;l++) {
+    for (int r=0;r<ct.numRes;r++) {
         for (int i=0; i<ct.N; i++) {
-            (*dcrt_0[l].m_values)[i].SetValue(ct.sub_0[l*ct.N + i]);
-            (*dcrt_1[l].m_values)[i].SetValue(ct.sub_1[l*ct.N + i]);
+            (*dcrt_0[r].m_values)[i].SetValue(ct.sub_0[r*ct.N + i]);
+            (*dcrt_1[r].m_values)[i].SetValue(ct.sub_1[r*ct.N + i]);
         }
     }
     sub_0.m_vectors=dcrt_0;
@@ -121,22 +121,24 @@ Ciphertext<DCRTPoly> GetOpenFHECipherText(RawCipherText ct) {
     return result;
 };
 
-void MoveToGPU(RawCipherText ct) {
-    ct.sub_0=moveArrayToGPU(ct.sub_0, ct.N*ct.limbs);
-    ct.sub_1=moveArrayToGPU(ct.sub_1, ct.N*ct.limbs);
+void MoveToGPU(RawCipherText* ct) {
+    int numElems=ct->N * ct->numRes;
+    ct->sub_0=moveArrayToGPU(ct->sub_0, numElems);
+    ct->sub_1=moveArrayToGPU(ct->sub_1, numElems);
 };
 
-void MoveToHost(RawCipherText ct) {
-    ct.sub_0=moveArrayToHost(ct.sub_0, ct.N*ct.limbs);
-    ct.sub_1=moveArrayToHost(ct.sub_1, ct.N*ct.limbs);
+void MoveToHost(RawCipherText* ct) {
+    int numElems=ct->N * ct->numRes;
+    ct->sub_0=moveArrayToHost(ct->sub_0, numElems);
+    ct->sub_1=moveArrayToHost(ct->sub_1, numElems);
 };
 
-RawCipherText EvalAddGPU(RawCipherText ct1, RawCipherText ct2) {
-    for (int l=0;l<ct1.limbs;l++) {
-        gpuAdd(&ct1.sub_0[l*ct1.N],&ct2.sub_0[l*ct1.N],&ct1.sub_0[l*ct1.N], ct1.N, ct1.moduli[l]);
-        gpuAdd(&ct1.sub_1[l*ct1.N],&ct2.sub_1[l*ct1.N],&ct1.sub_1[l*ct1.N], ct1.N, ct1.moduli[l]);
+void EvalAddGPU(RawCipherText* ct1, RawCipherText* ct2) {
+    for (int r=0;r<ct1->numRes;r++) {
+        gpuAdd(&ct1->sub_0[r*ct1->N],&ct2->sub_0[r*ct1->N],&ct1->sub_0[r*ct1->N], ct1->N, ct1->moduli[r]);
+        gpuAdd(&ct1->sub_1[r*ct1->N],&ct2->sub_1[r*ct1->N],&ct1->sub_1[r*ct1->N], ct1->N, ct1->moduli[r]);
     }
-    return ct1;
+    
 };
 
 int main() {
@@ -191,19 +193,80 @@ int main() {
 
     // Individual polynomials of each ciphertext
     // type should be vector<PolyImpl<vector<int>>>
-    // ciphertext -> get sub-ciphertexts -> access idx -> get all limbs of each sub-ciphertext
+    // ciphertext -> get sub-ciphertexts -> access idx -> get all numRes of each sub-ciphertext
     // each limb has m_data coefficients (integers) and an m_modulus modulus
+
+
+    uint64_t* testArray=new uint64_t[16]();
+    uint64_t* testArray2=new uint64_t[16]();
+    for (int i=0;i<16;i++) {
+        testArray[i]=i;
+        testArray2[i]=i;
+        std::cout << testArray[i] << std::endl;
+    }
+    
+    // Testing moveArray, I think it works?
+    testArray=moveArrayToGPU(testArray, 16);
+    testArray2=moveArrayToGPU(testArray2, 16);
+    gpuAdd(testArray, testArray2, testArray, 16, 100);
+    testArray=moveArrayToHost(testArray, 16);
+
+    for (int i=0;i<16;i++) {
+        std::cout << testArray[i] << std::endl;
+    }
 
     std::cout << "Converting c1 to raw, then move to GPU and back and back" << std::endl;
 
     auto c1_raw=GetRawCipherText(cc, c1);
-    MoveToGPU(c1_raw);
-    MoveToHost(c1_raw);
     auto c2_raw=GetRawCipherText(cc, c2);
+    std::cout << "Moving C1 to GPU" << std::endl;
+
+    MoveToGPU(&c1_raw);
+    std::cout << "Moving C2 to GPU" << std::endl;
+    MoveToGPU(&c2_raw);
+
+    std::cout << "Adding on GPU" << std::endl;
+
+    auto start = std::chrono::high_resolution_clock::now();
+    EvalAddGPU(&c1_raw, &c2_raw);
+    EvalAddGPU(&c1_raw, &c2_raw);
+    EvalAddGPU(&c1_raw, &c2_raw);
+    EvalAddGPU(&c1_raw, &c2_raw);
+    EvalAddGPU(&c1_raw, &c2_raw);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()/5;
+    std::cout.precision(8);
+
+    std::cout << "add time " << duration << "us" << std::endl;
+    MoveToHost(&c1_raw);
+    MoveToHost(&c2_raw);
+
+    // std::cout << "Checking" << std::endl;
+    // for (int r=0;r<c1_raw.numRes;r++) {
+    //     for (int i=0;i<c1_raw.N;i++) {
+    //         auto idx=r*c1_raw.N+i;
+    //         if (c1_raw.sub_0[idx] != c1_orig[idx] + c2_raw.sub_0[idx] % c1_raw.moduli[r]) {
+    //             std::cout << idx << std::endl;
+    //             std::cout << c1_orig[idx] <<std::endl;
+    //             std::cout << c2_raw.sub_0[idx] <<std::endl;
+    //             std::cout << c1_raw.sub_0[idx] <<std::endl;
+    //             std::cout << c1_raw.moduli[r] <<std::endl;
+    //             break;
+    //         }
+    //     }
+    // }
+
     auto c1_back=GetOpenFHECipherText(c1_raw);
 
     std::cout << "Adding" << std::endl;
+    start = std::chrono::high_resolution_clock::now();
     auto cAdd = cc->EvalAdd(c1_back, c2);
+    end = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    std::cout.precision(8);
+
+    std::cout << "add time " << duration << "us" << std::endl;
+
 
     Plaintext result;
     std::cout.precision(8);

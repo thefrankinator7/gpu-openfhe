@@ -3,40 +3,41 @@
 *.o
 *.o.d
 *.gcov
-bin/
-build*/
-cmake-build-debug
-docs/doxygen
-docs/sphinx
-_build/
-api/
-doxyoutput/
+
+new-openfhe/bin/
+new-openfhe/build*/
+new-openfhe/cmake-build-debug
+new-openfhe/docs/doxygen
+new-openfhe/docs/sphinx
+new-openfhe/_build/
+new-openfhe/api/
+new-openfhe/doxyoutput/
 
 
-.ipynb_checkpoints
+new-openfhe/.ipynb_checkpoints
 
-test/build
-test/bin
-output.txt
-Doxyfile
-apidoc_warning_logfile.txt
-third-party/distros/gmp-6.1.1
-third-party/distros/gmp-6.1.2
-third-party/distros/ntl-10.3.0
-third-party/distros/ntl-10.5.0
-third-party/include/NTL
-third-party/include/gmp.h
-third-party/lib
-third-party/share
+new-openfhe/test/build
+new-openfhe/test/bin
+new-openfhe/output.txt
+new-openfhe/Doxyfile
+new-openfhe/apidoc_warning_logfile.txt
+new-openfhe/third-party/distros/gmp-6.1.1
+new-openfhe/third-party/distros/gmp-6.1.2
+new-openfhe/third-party/distros/ntl-10.3.0
+new-openfhe/third-party/distros/ntl-10.5.0
+new-openfhe/third-party/include/NTL
+new-openfhe/third-party/include/gmp.h
+new-openfhe/third-party/lib
+new-openfhe/third-party/share
 **/gmp-*
 **/ntl-*
-timing/
-gmon.out
+new-openfhe/timing/
+new-openfhe/gmon.out
 ## .gitattributes
 # Except this file
 !.gitignore
 
-.idea
+new-openfhe/.idea
 */**/*.gch
 *.a
 *.class
@@ -57,17 +58,17 @@ RemoteSystemTempFiles/
 # CMakeLists.txt
 .idea/
 
-src/circuit/lib/scan.cpp
-src/circuit/lib/parse.cpp
-src/circuit/lib/parse.hpp
-src/circuit/lib/*.hh
+new-openfhe/src/circuit/lib/scan.cpp
+new-openfhe/src/circuit/lib/parse.cpp
+new-openfhe/src/circuit/lib/parse.hpp
+new-openfhe/src/circuit/lib/*.hh
 
 # vagrant output
-.vagrant/
+new-openfhe/.vagrant/
 *.log
 
 # gtest output files
-test_detail.xml
+new-openfhe/test_detail.xml
 
 # Visual Studio Code
-.vscode
+new-openfhe/.vscode

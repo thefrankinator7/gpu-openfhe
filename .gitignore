@@ -1,4 +1,76 @@
+# Ignore everything in this directory
+*~
+*.o
+*.o.d
+*.gcov
 
-hip_kernels/build/
-
+hip_kernels/build
 new_openfhe/build/
+new_openfhe/bin/
+new_openfhe/build*/
+new_openfhe/cmake-build-debug
+new_openfhe/docs/doxygen
+new_openfhe/docs/sphinx
+new_openfhe/_build/
+new_openfhe/api/
+new_openfhe/doxyoutput/
+
+
+new_openfhe/.ipynb_checkpoints
+
+new_openfhe/test/build
+new_openfhe/test/bin
+new_openfhe/output.txt
+new_openfhe/Doxyfile
+new_openfhe/apidoc_warning_logfile.txt
+new_openfhe/third-party/distros/gmp-6.1.1
+new_openfhe/third-party/distros/gmp-6.1.2
+new_openfhe/third-party/distros/ntl-10.3.0
+new_openfhe/third-party/distros/ntl-10.5.0
+new_openfhe/third-party/include/NTL
+new_openfhe/third-party/include/gmp.h
+new_openfhe/third-party/lib
+new_openfhe/third-party/share
+**/gmp-*
+**/ntl-*
+new_openfhe/timing/
+new_openfhe/gmon.out
+## .gitattributes
+# Except this file
+!.gitignore
+
+new_openfhe/.idea
+*/**/*.gch
+*.a
+*.class
+
+## for the moment
+.cproject
+.metadata/
+.project
+.settings/
+RemoteSystemTempFiles/
+.classpath
+.externalToolBuilders/
+/Default/
+
+.DS_Store
+
+# Ignore intellij project files/cmake files
+# CMakeLists.txt
+.idea/
+
+new_openfhe/src/circuit/lib/scan.cpp
+new_openfhe/src/circuit/lib/parse.cpp
+new_openfhe/src/circuit/lib/parse.hpp
+new_openfhe/src/circuit/lib/*.hh
+
+# vagrant output
+new_openfhe/.vagrant/
+*.log
+
+# gtest output files
+new_openfhe/test_detail.xml
+
+# Visual Studio Code
+new_openfhe/.vscode/
