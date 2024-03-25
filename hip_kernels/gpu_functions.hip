@@ -9,16 +9,15 @@
 using std::uint64_t;
 
 __global__ void vecAdd(
-    const uint64_t *a, const uint64_t *b, uint64_t *c, size_t n, uint64_t modulus)
+    const uint64_t *a, const uint64_t *b, uint64_t *c, int total, uint64_t* moduli)
 {
-    int id=blockIdx.x*blockDim.x+threadIdx.x;
-    if (id < n)
-    c[id] = a[id] + b[id];
-    if (c[id]>modulus) {
-        c[id]=c[id]-modulus;
-    }
-    if (c[id]<0) {
-        c[id]=c[id]+modulus;
+    int id=blockIdx.y * gridDim.x * blockDim.x +
+                blockIdx.x * blockDim.x +
+                threadIdx.x;
+    
+    uint64_t modulus = moduli[blockIdx.y];
+    if (id < total) {
+        c[id]=(a[id] + b[id]) % modulus;
     }
 }
 
@@ -60,54 +59,35 @@ uint64_t* moveArrayToGPU(uint64_t* array, int n) {
     size_t bytes = n*sizeof(uint64_t);
     HIP_ASSERT(hipMalloc(&GPUArray, bytes));
     HIP_ASSERT(hipMemcpy(GPUArray, array, bytes, hipMemcpyHostToDevice));
-//    hipError_t status = hipMemcpy(GPUArray, array, bytes, hipMemcpyHostToDevice);
-//    if (status != hipSuccess) {
-//        std::cerr << "hipMemcpy failed: " << hipGetErrorString(status) << std::endl;
-//        // Handle error, possibly clean up resources
-//    }
     return GPUArray;
 }
 
 uint64_t* moveArrayToHost(uint64_t* GPUArray, int n) {
     size_t bytes = n*sizeof(uint64_t);
     uint64_t* HostArray;
-    //hipError_t status1 = hipHostMalloc(&HostArray, bytes, hipHostMallocDefault);
-
-    //if (status1 != hipSuccess) {
-    //    std::cerr << "hipHostMalloc failed: " << hipGetErrorString(status1) << std::endl;
-    //}
+ 
     HIP_ASSERT(hipHostMalloc(&HostArray, bytes, hipHostMallocDefault));
-
     HIP_ASSERT(hipMemcpy(HostArray, GPUArray, bytes, hipMemcpyDeviceToHost));
-    //hipError_t status = hipMemcpy(HostArray, GPUArray, bytes, hipMemcpyDeviceToHost);
-    //if (status != hipSuccess) {
-    //    std::cerr << "hipMemcpy failed: " << hipGetErrorString(status) << std::endl;
-    //    // Handle error, possibly clean up resources
-    //}
     return HostArray;
 }
 
 
 void gpuAdd(uint64_t *GPUArrayA, uint64_t *GPUArrayB, uint64_t *GPUArrayC,
-    int n, uint64_t modulus)
+    int N, int L, uint64_t* moduli)
     {
-    //Number of threads in each thread block
-    int blockSize = 1024;
-    // Number of thread blocks in grid
-    int gridSize = (int)ceil((float)n/blockSize);
-    // add start timer
+    int total=N*L;
     
-    auto start = std::chrono::high_resolution_clock::now();
+    dim3 blockSize(1024, 1); // 32x32 threads per block
+
+    // Calculate the number of blocks needed in each dimension
+    int gridX = (int)ceil((float) N / blockSize.x);
+    int gridY = L;//(int)ceil((float) L / blockSize.y);
+    dim3 gridSize(gridX, gridY); // Grid size
 
     // Execute the kernel
-    vecAdd<<<gridSize, blockSize>>>(GPUArrayA, GPUArrayB, GPUArrayC, n, modulus);
-    hipDeviceSynchronize();
-    // add end timer, print
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    std::cout.precision(8);
+    vecAdd<<<gridSize, blockSize>>>(GPUArrayA, GPUArrayB, GPUArrayC, total, moduli);
+    //hipDeviceSynchronize();
 
-    //std::cout << "add time " << duration << "ns" << std::endl;
     }
 
 

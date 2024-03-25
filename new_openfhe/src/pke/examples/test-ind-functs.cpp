@@ -43,8 +43,11 @@
 
 using namespace lbcrypto;
 
-#define EVALUATION 0;
-#define COEFFICIENT 1;
+enum CipherTextFormat {
+    RAWEVAL,
+    RAWCOEF,
+    // other formats
+};
 
 /*
 * The rawCipherText Class contains the basic information needed to hold a ciphertext, with pointers to data that can be contained on the GPU or main memory
@@ -58,7 +61,7 @@ struct RawCipherText {
   uint64_t* moduli; // moduli for each limb
   int numRes; // number of residues of ciphertext, length of moduli array and first dimension of sub-ciphertexts
   int N; // length of each polynomial
-  bool format; // current format of ciphertext, either coefficient or evaluation
+  Format format; // current format of ciphertext, either coefficient or evaluation
 };
 
 uint64_t* GetRawArray(std::vector<lbcrypto::PolyImpl<lbcrypto::NativeVector>> polys) {
@@ -125,32 +128,69 @@ void MoveToGPU(RawCipherText* ct) {
     int numElems=ct->N * ct->numRes;
     ct->sub_0=moveArrayToGPU(ct->sub_0, numElems);
     ct->sub_1=moveArrayToGPU(ct->sub_1, numElems);
+    ct->moduli=moveArrayToGPU(ct->moduli, ct->numRes);
 };
 
 void MoveToHost(RawCipherText* ct) {
     int numElems=ct->N * ct->numRes;
     ct->sub_0=moveArrayToHost(ct->sub_0, numElems);
     ct->sub_1=moveArrayToHost(ct->sub_1, numElems);
+    ct->moduli=moveArrayToHost(ct->moduli, ct->numRes);
 };
 
 void EvalAddGPU(RawCipherText* ct1, RawCipherText* ct2) {
-    for (int r=0;r<ct1->numRes;r++) {
-        gpuAdd(&ct1->sub_0[r*ct1->N],&ct2->sub_0[r*ct1->N],&ct1->sub_0[r*ct1->N], ct1->N, ct1->moduli[r]);
-        gpuAdd(&ct1->sub_1[r*ct1->N],&ct2->sub_1[r*ct1->N],&ct1->sub_1[r*ct1->N], ct1->N, ct1->moduli[r]);
-    }
-    
+    // if (ct1->format == EVALUATION) {
+    //     std::cout << "Doing iNTT before Adding" << std::endl;
+    // }
+    // if (ct2->format == EVALUATION) {
+    //     std::cout << "Doing iNTT before Adding" << std::endl;
+    // }
+    gpuAdd(ct1->sub_0, ct2->sub_0, ct1->sub_0, ct1->N, ct1->numRes, ct1->moduli);
+    gpuAdd(ct1->sub_1, ct2->sub_1, ct1->sub_1, ct1->N, ct1->numRes, ct1->moduli);
 };
+
+
+// void GPUNTT(RawCipherText* ct) {
+//     if (ct->format==EVALUATION) {
+//         std::cout << "Already in Evaluation Format" << std::endl;
+//     }
+//     else {
+//         // get twiddles
+//         // do gpuNTT
+//         return;
+//     }
+// }
+
+// void GPUiNTT(RawCipherText* ct) {
+//     if (ct->format==COEFFICIENT) {
+//         std::cout << "Already in Coefficient Format" << std::endl;
+//     }
+//     else {
+//         // get twiddles
+//         // do gpuiNTT
+//         return;
+//     }
+// }
+
+
+// void EvalMultGPU(RawCipherText* ct1, RawCipherText* ct2) {
+//     return;
+// }
+
+
 
 int main() {
 
-    uint32_t multDepth = 1;
+    uint32_t multDepth = 40;
     uint32_t scaleModSize = 50;
     uint32_t batchSize = 8;
+    //uint32_t ringDim=1 << 16;
 
     CCParams<CryptoContextCKKSRNS> parameters;
     parameters.SetMultiplicativeDepth(multDepth);
     parameters.SetScalingModSize(scaleModSize);
     parameters.SetBatchSize(batchSize);
+    //parameters.SetRingDim(ringDim);
 
     CryptoContext<DCRTPoly> cc = GenCryptoContext(parameters);
 
@@ -196,28 +236,10 @@ int main() {
     // ciphertext -> get sub-ciphertexts -> access idx -> get all numRes of each sub-ciphertext
     // each limb has m_data coefficients (integers) and an m_modulus modulus
 
-
-    uint64_t* testArray=new uint64_t[16]();
-    uint64_t* testArray2=new uint64_t[16]();
-    for (int i=0;i<16;i++) {
-        testArray[i]=i;
-        testArray2[i]=i;
-        std::cout << testArray[i] << std::endl;
-    }
-    
-    // Testing moveArray, I think it works?
-    testArray=moveArrayToGPU(testArray, 16);
-    testArray2=moveArrayToGPU(testArray2, 16);
-    gpuAdd(testArray, testArray2, testArray, 16, 100);
-    testArray=moveArrayToHost(testArray, 16);
-
-    for (int i=0;i<16;i++) {
-        std::cout << testArray[i] << std::endl;
-    }
-
     std::cout << "Converting c1 to raw, then move to GPU and back and back" << std::endl;
 
     auto c1_raw=GetRawCipherText(cc, c1);
+    std::cout << c1_raw.numRes << std::endl;
     auto c2_raw=GetRawCipherText(cc, c2);
     std::cout << "Moving C1 to GPU" << std::endl;
 
@@ -228,16 +250,15 @@ int main() {
     std::cout << "Adding on GPU" << std::endl;
 
     auto start = std::chrono::high_resolution_clock::now();
+    for (int i=0;i<100;i++) {
     EvalAddGPU(&c1_raw, &c2_raw);
-    EvalAddGPU(&c1_raw, &c2_raw);
-    EvalAddGPU(&c1_raw, &c2_raw);
-    EvalAddGPU(&c1_raw, &c2_raw);
-    EvalAddGPU(&c1_raw, &c2_raw);
+    }
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()/5;
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()/1000;
     std::cout.precision(8);
 
     std::cout << "add time " << duration << "us" << std::endl;
+
     MoveToHost(&c1_raw);
     MoveToHost(&c2_raw);
 
