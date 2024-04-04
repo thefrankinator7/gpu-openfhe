@@ -52,6 +52,11 @@ void addCiphertexts(int i, int j,
     EvalAddGPU(&allCipherTexts[i], &allCipherTexts[j]);
 }
 
+void addOpenFHECiphertexts(int i, int j, const CryptoContext<DCRTPoly> cc, 
+                    const std::vector<Ciphertext<DCRTPoly>> &allOpenFHECipherTexts) {
+    auto temp = cc->EvalAdd(allOpenFHECipherTexts[i], allOpenFHECipherTexts[j]);
+}
+
 // void multCiphertexts(int i, int j, const CryptoContext<DCRTPoly> cc, 
 //                     const std::vector<Ciphertext<DCRTPoly>> &allCipherTexts) {
 //     auto temp = cc->EvalMult(allCipherTexts[i], allCipherTexts[j]);
@@ -153,10 +158,12 @@ int main() {
     // loop over powers of 2, eventually crashes around i=12
     for (int i=1; i<=16; i++) {
         int numVectors = std::pow(2, i);
-        std::cout << "Initializing " << numVectors << " vectors for 2^" << i << std::endl;
+        std::cout << "Initializing " << numVectors << " ciphertexts for 2^" << i << std::endl;
 
         std::vector<std::vector<double>> allVectors(numVectors);
         std::vector<RawCipherText> allCipherTexts(numVectors);
+        std::vector<decltype(c1)> allOpenFHECipherTexts(numVectors);
+
         // Initialize ciphertexts
         for (int j = 0; j < numVectors; ++j) {
                 std::vector<double> vec(8); // Create a vector of length 10
@@ -173,6 +180,7 @@ int main() {
                 auto ct_raw=GetRawCipherText(cc, ct);
                 MoveToGPU(&ct_raw);
                 allCipherTexts[j]=ct_raw;
+                allOpenFHECipherTexts[j]=ct;
             }
 
         hipSync();
@@ -197,29 +205,34 @@ int main() {
 
         
         std::cout << "Number of Operations: " << numOps << std::endl;
+        std::cout << "GPU Implementation: " << numOps << std::endl;
         std::cout << "add time " << duration << "ms" << std::endl;
 
         threads.clear();
 
-        // start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::high_resolution_clock::now();
 
-        // // Add together
+        // Add together
+
+        for (int i = 0; i < numOps; ++i) {
+            // Launch thread
+            threads.emplace_back(addOpenFHECiphertexts, i, numOps+i, cc, std::ref(allOpenFHECipherTexts));
+        }
+
+        for (auto &thread : threads) {
+            thread.join();
+        }
+        hipSync();
+
+        end = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        std::cout.precision(8);
+
         
-        // for (int i = 0; i < numOps; ++i) {
-        //     // Launch thread
-        //     threads.emplace_back(multCiphertexts, i, numOps+i, cc, std::ref(allCipherTexts));
-        // }
+        std::cout << "OpenFHE CPU: " << numOps << std::endl;
+        std::cout << "add time " << duration << "ms" << std::endl;
 
-        // for (auto &thread : threads) {
-        //     thread.join();
-        // }
-
-        // end = std::chrono::high_resolution_clock::now();
-        // duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        
-        // std::cout << "multiplication time " << duration << "ms" << std::endl;
-
-        // threads.clear();
+        threads.clear();
 
     }
 

@@ -40,7 +40,7 @@
 #include "math/hal/intnat/ubintnat.h"
 #include "math/hal/vector.h"
 
-#include "gpu_functions.h"
+
 #include <unistd.h>  
 
 #include "utils/exception.h"
