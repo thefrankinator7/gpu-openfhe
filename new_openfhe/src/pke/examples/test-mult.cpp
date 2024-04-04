@@ -97,7 +97,7 @@ int main() {
     std::cout << "Multiplying on GPU" << std::endl;
 
     // auto cMult=EvalMultGPU(&c1_raw, &c2_raw);
-    EvalMultGPUNoRelin(&c1_raw, &c2_raw);
+    //EvalMultGPUNoRelin(&c1_raw, &c2_raw);
 
     auto start = std::chrono::high_resolution_clock::now();
     auto cMultCPU=cc->EvalMultNoRelin(c1,c2);

@@ -117,9 +117,9 @@ void benchOps(int logq, int L, int ringDim) {
 
     start = std::chrono::high_resolution_clock::now();
 
-    for (int i=0;i<10;i++) {
-    EvalMultGPUNoRelin(&c1_raw, &c2_raw);
-    }
+    // for (int i=0;i<10;i++) {
+    // EvalMultGPUNoRelin(&c1_raw, &c2_raw);
+    // }
 
     end = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
