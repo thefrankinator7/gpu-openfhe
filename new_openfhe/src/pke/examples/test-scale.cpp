@@ -69,12 +69,11 @@ int main() {
 
     uint32_t scaleModSize = 50;
 
-    uint32_t batchSize = 8;
-
     CCParams<CryptoContextCKKSRNS> parameters;
     parameters.SetMultiplicativeDepth(multDepth);
     parameters.SetScalingModSize(scaleModSize);
-    parameters.SetBatchSize(batchSize);
+    //parameters.SetRingDim(ringDim);
+
 
     CryptoContext<DCRTPoly> cc = GenCryptoContext(parameters);
 
@@ -148,7 +147,7 @@ int main() {
     std::uniform_real_distribution<> distrib(1, 100); // Define the range
 
     // multithreading
-    int numThreads = std::thread::hardware_concurrency(); // Use as many threads as there are cores, or choose your number.
+    int numThreads = 128;//std::thread::hardware_concurrency(); // Use as many threads as there are cores, or choose your number.
     std::cout<< "Working with " << numThreads << " Threads" << std::endl;
     std::vector<std::thread> threads;
 
@@ -200,12 +199,12 @@ int main() {
         hipSync();
 
         end = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         std::cout.precision(8);
 
         
         std::cout << "Number of Operations: " << numOps << std::endl;
-        std::cout << "GPU Implementation: " << numOps << std::endl;
+        std::cout << "GPU Implementation: " << std::endl;
         std::cout << "add time " << duration << "ms" << std::endl;
 
         threads.clear();
@@ -225,14 +224,20 @@ int main() {
         hipSync();
 
         end = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         std::cout.precision(8);
 
         
-        std::cout << "OpenFHE CPU: " << numOps << std::endl;
+        std::cout << "OpenFHE CPU: " << std::endl;
         std::cout << "add time " << duration << "ms" << std::endl;
 
+
+        for (int j = 0; j < numVectors; ++j) {
+                MoveToHost(&(allCipherTexts[j]));
+        }
+
         threads.clear();
+        hipSync();
 
     }
 

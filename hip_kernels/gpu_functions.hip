@@ -3,6 +3,7 @@
 #include "hip/hip_runtime.h"
 #include <chrono>
 #include <iostream>
+#include "functions.hpp"
 
 // #include <cassert>
 // #include <cmath>
@@ -44,6 +45,236 @@ __global__ void vecMult(
     }
 }
 
+// Modular multipliers //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+__device__ __forceinline__ void neals_barrett(uint128_t& c, uint64_t& q, uint64_t& mu, int& qbit)  // Ozerk
+{  
+    uint128_t rx;
+    rx = c >> (qbit - 2);
+    rx *= mu;
+    rx >>= qbit + 3;
+    rx *= q;
+    c -= rx;
+    c -= q * (c >= (uint128_t)q);
+}
+
+// Butterfly operations //////////////////////////////////////////////////////////////////////////////////////
+__device__ __forceinline__ void barrett_CT_butterfly(uint64_t& a, uint64_t& b, uint64_t& twiddle, uint64_t &q, uint64_t& mu, int& qbit){
+    uint128_t temp_mult = (uint128_t)b * twiddle;
+    neals_barrett(temp_mult, q, mu, qbit);
+    b = (uint64_t)temp_mult;
+    uint64_t temp = a + b;
+    temp -= q * (temp>=q);
+    b = q*(a<b) + (a-b);
+    a = temp;
+};
+
+__device__ __forceinline__ void barrett_GS_butterfly(uint64_t& a, uint64_t& b, uint64_t& twiddle, uint64_t &q, uint64_t& q2, uint64_t& mu, int& qbit){
+    uint64_t temp = a + b;
+    temp -= q * (temp>=q); // addition
+    a += q*(a < b);
+    uint128_t temp_mult = (uint128_t)(a - b); 
+    temp_mult *= twiddle;
+    neals_barrett(temp_mult, q, mu, qbit);
+    a = (temp >> 1) + q2*(temp & 1);   // store addition result
+    temp = (uint64_t)temp_mult;                   // cast to uint64_t
+    b = (temp >> 1) + q2*(temp & 1);   // store subtraction result
+}
+
+// 2D (i)NTT kernels ///////////////////////////////////////////////////////////////////////////////////////
+__global__ void NTT2D_1st(  uint64_t *a,
+                            uint64_t *psi,
+                            uint64_t q,
+                            uint64_t mu,
+                            int qbit){
+    // -----variable init-----
+    int index = threadIdx.x * blockDim.x * 2 + blockIdx.x; // global index of the butterfly operation, also the global memory index
+    // 2D NTT consists of 2 kernels:
+    // 1st kernel : global m != local m, global length = local length
+    // 2nd kernel : global m = local m, global length != local length
+    // int glo_m = Nper2; // global step size
+    int log_g_m = logNper2; // log global step size
+    int l_m = 128; // local step size
+    int log_l_m = 7; // log local step size
+
+    // -----bring coefficients to the shared memory-----
+    __shared__ uint64_t shared_coeff[BLOCK_SIZE2D*2]; // block_size = 128 * 2 = 256, 256-point NTT
+
+    // 1 thread brings 2 coeff
+    shared_coeff[threadIdx.x] = a[index]; // take the first coeff for the bfly
+    shared_coeff[threadIdx.x+128] = a[index + Nper2]; // take the second coeff for the bfly, the paired coeff
+
+    // wait until all threads finish
+    __syncthreads();
+
+    // -----perform 255 point NTT-----
+    #pragma unroll
+    for (int length = 1 ; length < 256 ; length<<=1, l_m>>=1, log_g_m--, log_l_m--){
+        // compute the local butterfly indices
+        int i = threadIdx.x >> log_l_m;
+        int bfly_i1 = (i*l_m*2) + (threadIdx.x % l_m);
+        int bfly_i2 = bfly_i1 + l_m; 
+
+        // generate global twiddle factor
+        int psi_idx = length + (index >> log_g_m);
+        uint64_t twiddle = psi[psi_idx];
+
+        // butterfly operation
+        barrett_CT_butterfly(shared_coeff[bfly_i1], shared_coeff[bfly_i2], twiddle, q, mu, qbit);
+
+        // wait for all threads to complete their butterfly operation
+        __syncthreads();
+    }
+    // -----return the coefficients to the global memory-----
+    a[index] = shared_coeff[threadIdx.x];
+    a[index + Nper2] = shared_coeff[threadIdx.x + 128];
+}
+
+__global__ void NTT2D_2nd(  uint64_t *a,
+                            uint64_t *psi,
+                            uint64_t q,
+                            uint64_t mu,
+                            int qbit){
+    // -----variable init-----
+    int index = blockIdx.x * blockDim.x + threadIdx.x; // global index of the butterfly operation
+    int g_addr = blockIdx.x * blockDim.x * 2 + threadIdx.x; // global memory index
+    // 2D NTT consists of 2 kernels:
+    // 1st kernel : global m != local m, global length = local length
+    // 2nd kernel : global m = local m, global length != local length
+    int m = 128; // local step size
+    int logm = 7; // log local step size
+    int g_length = 256; // global length, for twiddle factor memory read
+
+    // -----bring coefficients to the shared memory-----
+    __shared__ uint64_t shared_coeff[BLOCK_SIZE2D*2]; // block_size = 128 * 2 = 256, 256-point NTT
+
+    // 1 thread brings 2 coeff
+    shared_coeff[threadIdx.x] = a[g_addr]; // take the first coeff for the bfly
+    shared_coeff[threadIdx.x+128] = a[g_addr + 128]; // take the second coeff for the bfly, the paired coeff
+
+    // wait until all threads finish
+    __syncthreads();
+
+    // -----perform 255 point NTT-----
+    #pragma unroll
+    for (int length = 1 ; length < 256 ; length<<=1, g_length<<=1, m>>=1, logm--){
+        // compute the local butterfly indices
+        int i = threadIdx.x >> logm;
+        int bfly_i1 = (i * m * 2) + (threadIdx.x % m);
+        int bfly_i2 = bfly_i1 + m; 
+
+        // generate global twiddle factor
+        int psi_idx = g_length + (index >> logm);
+        uint64_t twiddle = psi[psi_idx];
+
+        // butterfly operation
+        barrett_CT_butterfly(shared_coeff[bfly_i1], shared_coeff[bfly_i2], twiddle, q, mu, qbit);
+
+        // wait for all threads to complete their butterfly operation
+        __syncthreads();
+    }
+    // -----return the coefficients to the global memory-----
+    a[g_addr] = shared_coeff[threadIdx.x];
+    a[g_addr + 128] = shared_coeff[threadIdx.x + 128];
+}
+
+__global__ void iNTT2D_1st( uint64_t *a,
+                            uint64_t *psi,
+                            uint64_t q,
+                            uint64_t mu,
+                            int qbit){
+    // -----variable init-----
+    int index = blockIdx.x * blockDim.x + threadIdx.x; // global index of the butterfly operation
+    int g_addr = blockIdx.x * blockDim.x * 2 + threadIdx.x; // global memory index
+    // 2D NTT consists of 2 kernels:
+    // 1st kernel : global m != local m, global length = local length
+    // 2nd kernel : global m = local m, global length != local length
+    int m = 1; // local step size
+    int logm = 0; // log local step size
+    int g_length = Nper2; // global length, for twiddle factor memory read
+    uint64_t q2 = (q + 1) >> 1; // for modular reduction
+
+    // -----bring coefficients to the shared memory-----
+    __shared__ uint64_t shared_coeff[BLOCK_SIZE2D*2]; // block_size = 128 * 2 = 256, 256-point NTT
+
+    // 1 thread brings 2 coeff
+    shared_coeff[threadIdx.x] = a[g_addr]; // take the first coeff for the bfly
+    shared_coeff[threadIdx.x+128] = a[g_addr + 128]; // take the second coeff for the bfly, the paired coeff
+
+    // wait until all threads finish
+    __syncthreads();
+
+    // -----perform 255 point NTT-----
+    #pragma unroll
+    for (int length = 128 ; length >= 1 ; length>>=1, g_length>>=1, m<<=1, logm++){
+        // compute the local butterfly indices
+        int i = threadIdx.x >> logm;
+        int bfly_i1 = (i * m * 2) + (threadIdx.x % m);
+        int bfly_i2 = bfly_i1 + m; 
+
+        // generate global twiddle factor
+        int psi_idx = g_length + (index >> logm);
+        uint64_t twiddle = psi[psi_idx];
+
+        // butterfly operation
+        barrett_GS_butterfly(shared_coeff[bfly_i1], shared_coeff[bfly_i2], twiddle, q, q2, mu, qbit);
+
+        // wait for all threads to complete their butterfly operation
+        __syncthreads();
+    }
+    // -----return the coefficients to the global memory-----
+    a[g_addr] = shared_coeff[threadIdx.x];
+    a[g_addr + 128] = shared_coeff[threadIdx.x + 128];
+}
+
+__global__ void iNTT2D_2nd( uint64_t *a,
+                            uint64_t *psi,
+                            uint64_t q,
+                            uint64_t mu,
+                            int qbit){
+    // -----variable init-----
+    int index = threadIdx.x * blockDim.x * 2 + blockIdx.x; // global index of the butterfly operation
+    // 2D NTT consists of 2 kernels:
+    // 1st kernel : global m != local m, global length = local length
+    // 2nd kernel : global m = local m, global length != local length
+    // int glo_m = Nper2; // global step size
+    int log_g_m = 8; // log global step size
+    int l_m = 1; // local step size
+    int log_l_m = 0; // log local step size
+    uint64_t q2 = (q + 1) >> 1; // for modular reduction
+
+    // -----bring coefficients to the shared memory-----
+    __shared__ uint64_t shared_coeff[BLOCK_SIZE2D*2]; // block_size = 128 * 2 = 256, 256-point NTT
+
+    // 1 thread brings 2 coeff 
+    shared_coeff[threadIdx.x] = a[index]; // take the first coeff for the bfly
+    shared_coeff[threadIdx.x+128] = a[index+ Nper2]; // take the second coeff for the bfly, the paired coeff
+
+    // wait until all threads finish
+    __syncthreads();
+
+    // -----perform 255 point NTT-----
+    #pragma unroll
+    for (int length = 128 ; length >= 1 ; length>>=1, l_m<<=1, log_g_m++, log_l_m++){
+        // compute the local butterfly indices
+        int i = threadIdx.x >> log_l_m;
+        int bfly_i1 = (i*l_m*2) + (threadIdx.x % l_m);
+        int bfly_i2 = bfly_i1 + l_m; 
+
+        // generate global twiddle factor
+        int psi_idx = length + (index >> log_g_m);
+        uint64_t twiddle = psi[psi_idx];
+
+        // butterfly operation
+        barrett_GS_butterfly(shared_coeff[bfly_i1], shared_coeff[bfly_i2], twiddle, q, q2, mu, qbit);
+
+        // wait for all threads to complete their butterfly operation
+        __syncthreads();
+    }
+    // -----return the coefficients to the global memory-----
+    a[index] = shared_coeff[threadIdx.x];
+    a[index + Nper2] = shared_coeff[threadIdx.x + 128];
+}
+
 uint64_t* moveArrayToGPU(uint64_t* array, int n) {
     uint64_t *GPUArray;
     size_t bytes = n*sizeof(uint64_t);
@@ -59,6 +290,7 @@ uint64_t* moveArrayToHost(uint64_t* GPUArray, int n) {
  
     HIP_ASSERT(hipHostMalloc(&HostArray, bytes, hipHostMallocDefault));
     HIP_ASSERT(hipMemcpy(HostArray, GPUArray, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(GPUArray));
     return HostArray;
 }
 
@@ -104,72 +336,11 @@ void hipSync(){
     hipDeviceSynchronize();
 }
 
-// void gpuRelin(uint64_t *GPUArrayA, uint64_t *GPUArrayB, uint64_t *GPUArrayC,
-//     int N, int L, uint64_t* moduli, uint64_t* evk)
-
-// void gpuMult(const uint64_t *CPUArrayA, const uint64_t *CPUArrayB, uint64_t *CPUArrayC,
-//     size_t n, uint64_t modulus)
-//     {
-//         // Declare all CPU arrays here
-//     // Size, in bytes, of each vector
+void gpuNTT(uint64_t *h_input, uint64_t logN, int N, int L, uint64_t* moduli, int qbit) {
     
-//     uint64_t *GPUArrayA, *GPUArrayB, *GPUArrayC;
-//     size_t bytes = n*sizeof(uint64_t);
+    //myNTT CPU_in(logN, 62);
 
-//     HIP_ASSERT(hipMalloc(&GPUArrayA, bytes));
-//     HIP_ASSERT(hipMalloc(&GPUArrayB, bytes));
-//     HIP_ASSERT(hipMalloc(&GPUArrayC, bytes));
-//     HIP_ASSERT(hipMemcpy(GPUArrayA, CPUArrayA, bytes, hipMemcpyHostToDevice));
-//     HIP_ASSERT(hipMemcpy(GPUArrayB, CPUArrayB, bytes, hipMemcpyHostToDevice));
-
-//     //Number of threads in each thread block
-//     int blockSize = 1024;
-//     // Number of thread blocks in grid
-//     int gridSize = (int)ceil((float)n/blockSize);
-//     // Execute the kernel
-//     vecMult<<<gridSize, blockSize>>>(GPUArrayA, GPUArrayB, GPUArrayC, n, modulus);
-//     hipDeviceSynchronize();
+    // need to do ntt for each limb in rns;
     
-//     HIP_ASSERT(hipMemcpy(CPUArrayC, GPUArrayC, bytes, hipMemcpyDeviceToHost));
-//     }
-
-
-// __global__ void nttKernel(uint64_t *data, const uint64_t *twiddles, size_t n, size_t p) {
-//     int id = blockIdx.x * blockDim.x + threadIdx.x;
-
-//     if (id < n) {
-//         for (int len = 2; len <= n; len <<= 1) {
-//             int halfLen = len >> 1;
-//             int baseTwiddle = n / len;
-//             for (int i = id; i < n; i += len) {
-//                 int j = i + halfLen;
-//                 int twiddleIdx = (i % halfLen) * baseTwiddle;
-//                 uint64_t t = (twiddles[twiddleIdx] * data[j]) % p;
-//                 data[j] = (data[i] - t + p) % p;
-//                 data[i] = (data[i] + t) % p;
-//             }
-//         }
-//         __syncthreads();
-//     }
-// }
-
-// void gpuNtt(uint64_t *data, const uint64_t *twiddles, size_t n, size_t p) {
-//     uint64_t *d_data, *d_twiddles;
-//     hipMalloc(&d_data, n * sizeof(int));
-//     hipMalloc(&d_twiddles, n * sizeof(int));
-//     hipMemcpy(d_data, data, n * sizeof(int), hipMemcpyHostToDevice);
-//     hipMemcpy(d_twiddles, twiddles, n * sizeof(int), hipMemcpyHostToDevice);
-
-//     //Number of threads in each thread block
-//     int blockSize = 1024;
-//     // Number of thread blocks in grid
-//     int gridSize = (int)ceil((float)n/blockSize);
-//     // add start timer
-    
-//     auto start = std::chrono::high_resolution_clock::now();
-//     nttKernel<<<gridSize, blockSize>>>(d_data, d_twiddles, n, p);
-
-//     hipMemcpy(data, d_data, n * sizeof(int), hipMemcpyDeviceToHost);
-//     hipFree(d_data);
-//     hipFree(d_twiddles);
-// }
+    // do ntt 
+}

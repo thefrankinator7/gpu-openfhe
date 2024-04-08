@@ -145,6 +145,6 @@ void benchOps(int logq, int L, int ringDim) {
 }
 int main() {
     
-    benchOps(50, 40, 131072);
+    benchOps(37, 31, 1<<15);
     
 }
