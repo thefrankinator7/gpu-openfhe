@@ -75,6 +75,16 @@ void testNTT(int qbit, uint32_t L, int logN) {
     Plaintext ptxt1 = cc->MakeCKKSPackedPlaintext(x1);
     auto c1 = cc->Encrypt(keys.publicKey, ptxt1);    
 
+    auto c1_raw=GetRawCipherText(cc, c1);
+    //std::cout << "Moving C1 to GPU" << std::endl;
+    MoveToGPU(&c1_raw);
+    
+
+    //std::cout << "Copying NTT params and moving to GPU" << std::endl;
+    NTT_params params = get_NTT_params(&c1_raw, logN, qbit);
+    hipSync();
+
+  
     auto start = std::chrono::high_resolution_clock::now();
     auto cv = c1->GetElements();
     for (auto& c : cv) {
@@ -104,14 +114,7 @@ void testNTT(int qbit, uint32_t L, int logN) {
     }
     c1->SetElements(cv);
 
-    auto c1_raw=GetRawCipherText(cc, c1);
-    //std::cout << "Moving C1 to GPU" << std::endl;
-    MoveToGPU(&c1_raw);
     
-
-    //std::cout << "Copying NTT params and moving to GPU" << std::endl;
-    NTT_params params = get_NTT_params(&c1_raw, logN, qbit);
-    hipSync();
     //std::cout << "Doing NTT  on GPU" << std::endl;
 
     start = std::chrono::high_resolution_clock::now();
