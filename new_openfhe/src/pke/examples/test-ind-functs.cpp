@@ -109,13 +109,14 @@ int main() {
     MoveToGPU(&c1_raw);
     std::cout << "Moving C2 to GPU" << std::endl;
     MoveToGPU(&c2_raw);
-
+  
     std::cout << "Adding on GPU" << std::endl;
-
+    hipSync();
     auto start = std::chrono::high_resolution_clock::now();
     for (int i=0;i<100;i++) {
     EvalAddGPU(&c1_raw, &c2_raw);
     }
+    hipSync();
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()/100;
     std::cout.precision(8);

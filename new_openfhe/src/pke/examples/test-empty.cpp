@@ -54,7 +54,9 @@ void addCiphertexts(int i, int j,
 
 void addOpenFHECiphertexts(int i, int j, const CryptoContext<DCRTPoly> cc, 
                     const std::vector<Ciphertext<DCRTPoly>> &allOpenFHECipherTexts) {
-    auto temp = cc->EvalAdd(allOpenFHECipherTexts[i], allOpenFHECipherTexts[j]);    
+    auto temp = cc->EvalAdd(allOpenFHECipherTexts[i], allOpenFHECipherTexts[j]);
+    temp = cc->EvalAdd(allOpenFHECipherTexts[i], temp);
+    
 }
 
 void multCiphertexts(int i, int j, 
@@ -65,7 +67,7 @@ void multCiphertexts(int i, int j,
 
 void multOpenFHECiphertexts(int i, int j, const CryptoContext<DCRTPoly> cc, 
                     const std::vector<Ciphertext<DCRTPoly>> &allCipherTexts) {
-    auto temp = cc->EvalMultNoRelin(allCipherTexts[i], allCipherTexts[j]);
+    auto temp = cc->EvalMult(allCipherTexts[i], allCipherTexts[j]);
 }
 
 void launchEmptyKernel() {
@@ -74,53 +76,10 @@ void launchEmptyKernel() {
 
 
 int main() {
-    uint32_t multDepth = 40;
 
-    uint32_t scaleModSize = 50;
-
-    CCParams<CryptoContextCKKSRNS> parameters;
-    parameters.SetMultiplicativeDepth(multDepth);
-    parameters.SetScalingModSize(scaleModSize);
-    parameters.SetRingDim(1 << 17);
-    parameters.SetSecurityLevel(HEStd_NotSet);
-
-
-    CryptoContext<DCRTPoly> cc = GenCryptoContext(parameters);
-
-    // Enable the features that you wish to use
-    cc->Enable(PKE);
-    cc->Enable(KEYSWITCH);
-    cc->Enable(LEVELEDSHE);
-    std::cout << "CKKS scheme is using ring dimension " << cc->GetRingDimension() << std::endl << std::endl;
-
-    // B. Step 2: Key Generation
-    /* B1) Generate encryption keys.
-   * These are used for encryption/decryption, as well as in generating
-   * different kinds of keys.
-   */
-    auto keys = cc->KeyGen();
-    cc->EvalMultKeyGen(keys.secretKey);
-
-    // Step 3: Encoding and encryption of inputs
-
-    // Inputs
-    // vector of c1 and c2, for loop running of evalAdd over vectors
-    // will need to make it multithreaded
-    
-    std::vector<double> x1 = {0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0};
-    std::vector<double> x2 = {5.0, 4.0, 3.0, 2.0, 1.0, 0.75, 0.5, 0.25};
-
-    // Encoding as plaintexts
-    Plaintext ptxt1 = cc->MakeCKKSPackedPlaintext(x1);
-    Plaintext ptxt2 = cc->MakeCKKSPackedPlaintext(x2);
-
-    // Encrypt the encoded vectors
-    auto c1 = cc->Encrypt(keys.publicKey, ptxt1);
-    auto c2 = cc->Encrypt(keys.publicKey, ptxt2);
-
-    std::random_device rd; // Obtain a random number from hardware
-    std::mt19937 gen(rd()); // Seed the generator
-    std::uniform_real_distribution<> distrib(1, 100); // Define the range
+    for (int i=0; i<32; i++) {
+        gpuEmptyKernel();
+    }
 
     // multithreading
     int numThreads = std::thread::hardware_concurrency(); // Use as many threads as there are cores, or choose your number.
@@ -130,63 +89,47 @@ int main() {
     std::chrono::high_resolution_clock::time_point start;
     std::chrono::high_resolution_clock::time_point end;
     long long duration;
-    // loop over powers of 2, eventually crashes around i=12
+
+    hipSync();
     for (int i=1; i<=16; i++) {
         int numVectors = std::pow(2, i);
-        std::cout << "Initializing " << numVectors << " ciphertexts for 2^" << i << std::endl;
-
-        std::vector<std::vector<double>> allVectors(numVectors);
-        std::vector<RawCipherText> allCipherTexts(numVectors);
-        std::vector<decltype(c1)> allOpenFHECipherTexts(numVectors);
-
-        // Initialize ciphertexts
-        for (int j = 0; j < numVectors; ++j) {
-                std::vector<double> vec(8); // Create a vector of length 10
-                for (double &val : vec) {
-                    val = distrib(gen); // Assign random values to each element in the vector
-                }
-
-                allVectors[j]=vec;
-                auto ct=cc->Encrypt(keys.publicKey, cc->MakeCKKSPackedPlaintext(vec));
-                auto ct_raw=GetRawCipherText(cc, ct);
-                MoveToGPU(&ct_raw);
-                allCipherTexts[j]=ct_raw;
-                allOpenFHECipherTexts[j]=ct;
-            }
+        std::cout << "Initializing " << numVectors << " \"vectors\" for 2^" << i << std::endl;
 
         hipSync();
         start = std::chrono::high_resolution_clock::now();
 
-        // Add together
+        // launch kernels
 
         int numOps=numVectors/2;
         for (int i = 0; i < numOps; ++i) {
             // Launch thread
-            threads.emplace_back(multCiphertexts, i, numOps+i, std::ref(allCipherTexts));
+            gpuEmptyKernel();
         }
 
-        for (auto &thread : threads) {
-            thread.join();
-        }
         hipSync();
-
         end = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         std::cout.precision(8);
 
-        
-        std::cout << "Number of Operations: " << numOps << std::endl;
-        std::cout << "GPU Implementation: " << std::endl;
-        std::cout << "mult time " << duration << "ms" << std::endl;
+        std::cout << "Number of Kernels: " << numOps << std::endl;
+        std::cout << "total time " << duration << "us" << std::endl;
+    }
+    
 
-        threads.clear();
+    // loop over powers of 2, eventually crashes around i=12
+    for (int i=1; i<=16; i++) {
+        int numVectors = std::pow(2, i);
+        std::cout << "Initializing " << numVectors << " \"vectors\" for 2^" << i << std::endl;
 
+        hipSync();
         start = std::chrono::high_resolution_clock::now();
 
-        // Add together
+        // launch kernels
+
+        int numOps=numVectors/2;
         for (int i = 0; i < numOps; ++i) {
             // Launch thread
-            threads.emplace_back(multOpenFHECiphertexts, i, numOps+i, cc, std::ref(allOpenFHECipherTexts));
+            threads.emplace_back(gpuEmptyKernel);
         }
 
         for (auto &thread : threads) {
@@ -195,17 +138,14 @@ int main() {
         hipSync();
 
         end = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        
-        std::cout << "OpenFHE CPU: " << std::endl;
-        std::cout << "mult time " << duration << "ms" << std::endl;
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        std::cout.precision(8);
 
-
-        for (int j = 0; j < numVectors; ++j) {
-                MoveToHost(&(allCipherTexts[j]));
-        }
+        std::cout << "Number of Kernels: " << numOps << std::endl;
+        std::cout << "total time " << duration << "us" << std::endl;
 
         threads.clear();
+
         hipSync();
 
     }

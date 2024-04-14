@@ -22,7 +22,12 @@ __global__ void vecAdd(
     int id=blockIdx.y * gridDim.x * blockDim.x +
                 blockIdx.x * blockDim.x +
                 threadIdx.x;
-    
+    // uint64_t modulus = moduli[blockIdx.y];
+    // uint64_t tmp = a[id] + b[id];
+    // if (id < total) {
+    //     c[id]= tmp - ((modulus-tmp) >> 63) * modulus;
+    // }
+    // works but with no performance benefit
     uint64_t modulus = moduli[blockIdx.y];
     if (id < total) {
         c[id]=(a[id] + b[id]) % modulus;
@@ -44,6 +49,12 @@ __global__ void vecMult(
         c[id]= (uint64_t) result;
     }
 }
+
+__global__ void emptyKernel()
+{
+    
+}
+
 
 // Modular multipliers //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __device__ __forceinline__ void neals_barrett(uint128_t& c, uint64_t& q, uint64_t& mu, int& qbit)  // Ozerk
@@ -308,7 +319,12 @@ void gpuAdd(uint64_t *GPUArrayA, uint64_t *GPUArrayB, uint64_t *GPUArrayC,
     dim3 gridSize(gridX, gridY); // Grid size
 
     // Execute the kernel
+    hipError_t status;
     vecAdd<<<gridSize, blockSize>>>(GPUArrayA, GPUArrayB, GPUArrayC, total, moduli);
+    status = hipGetLastError();
+    if (status != hipSuccess) {
+        fprintf(stderr, "Kernel launch failed: %s\n", hipGetErrorString(status));
+    }
     //hipDeviceSynchronize();
 
     }
@@ -325,22 +341,89 @@ void gpuMult(uint64_t *GPUArrayA, uint64_t *GPUArrayB, uint64_t *GPUArrayC,
     int gridY = L;//(int)ceil((float) L / blockSize.y);
     dim3 gridSize(gridX, gridY); // Grid size
 
+    hipError_t status;
+
     // Execute the kernel
     vecMult<<<gridSize, blockSize>>>(GPUArrayA, GPUArrayB, GPUArrayC, total, moduli);
+    status = hipGetLastError();
+    if (status != hipSuccess) {
+        fprintf(stderr, "Kernel launch failed: %s\n", hipGetErrorString(status));
+    }
     //hipDeviceSynchronize();
 
     }
+
+void gpuEmptyKernel() {
+    dim3 blockSize(1, 1); // 1024 threads per block
+
+    // Calculate the number of blocks needed in each dimension
+    int gridX = 1;
+    int gridY = 1;
+    dim3 gridSize(gridX, gridY); // Grid size
+
+    // Execute the kernel
+    hipError_t status;
+    emptyKernel<<<gridSize, blockSize>>>();
+    status = hipGetLastError();
+    if (status != hipSuccess) {
+        fprintf(stderr, "Kernel launch failed: %s\n", hipGetErrorString(status));
+    }
+}
 
 
 void hipSync(){
     hipDeviceSynchronize();
 }
 
-void gpuNTT(uint64_t *h_input, uint64_t logN, int N, int L, uint64_t* moduli, int qbit) {
-    
-    //myNTT CPU_in(logN, 62);
 
-    // need to do ntt for each limb in rns;
+void gpuNTT(uint64_t *rns_arrays, uint64_t *psi_arrays, uint64_t logN, int N, int L, uint64_t* moduli, uint64_t* mus, int qbit) {
     
-    // do ntt 
+    // calculate number of butterfly
+    const int num_of_btfly = N>>1;
+    // number of thread per block = 1024
+    const int threadsPerBlock = BLOCK_SIZE2D;
+    // calculate number of block
+    const int blocks = (num_of_btfly + threadsPerBlock - 1) / threadsPerBlock;
+    hipError_t status;
+    // need to do ntt for each limb in rns;
+    for (int i=0; i<L; i++) {
+        NTT2D_1st<<<blocks, threadsPerBlock>>>(rns_arrays + i * N, psi_arrays + i * N, moduli[i], mus[i], qbit);
+        status = hipGetLastError();
+        if (status != hipSuccess) {
+            fprintf(stderr, "Kernel launch failed: %s\n", hipGetErrorString(status));
+        }
+        HIP_ASSERT(hipDeviceSynchronize());
+        NTT2D_2nd<<<blocks, threadsPerBlock>>>(rns_arrays + i * N, psi_arrays + i * N, moduli[i], mus[i], qbit);
+        status = hipGetLastError();
+        if (status != hipSuccess) {
+            fprintf(stderr, "Kernel launch failed: %s\n", hipGetErrorString(status));
+        }
+        HIP_ASSERT(hipDeviceSynchronize());
+    }
+
+}
+
+void gpuINTT(uint64_t *rns_arrays, uint64_t *inv_psi_arrays, uint64_t logN, int N, int L, uint64_t* moduli, uint64_t* mus, int qbit) {
+    
+    // calculate number of butterfly
+    const int num_of_btfly = N>>1;
+    const int threadsPerBlock = BLOCK_SIZE2D;
+    const int blocks = (num_of_btfly + threadsPerBlock - 1) / threadsPerBlock;
+    hipError_t status;
+    // need to do ntt for each limb in rns;
+    for (int i=0; i<L; i++) {
+        iNTT2D_1st<<<blocks, threadsPerBlock>>>(rns_arrays + i * N, inv_psi_arrays + i * N, moduli[i], mus[i], qbit);
+        status = hipGetLastError();
+        if (status != hipSuccess) {
+            fprintf(stderr, "Kernel launch failed: %s\n", hipGetErrorString(status));
+        }
+        HIP_ASSERT(hipDeviceSynchronize());
+        iNTT2D_2nd<<<blocks, threadsPerBlock>>>(rns_arrays + i * N, inv_psi_arrays + i * N, moduli[i], mus[i], qbit);
+        status = hipGetLastError();
+        if (status != hipSuccess) {
+            fprintf(stderr, "Kernel launch failed: %s\n", hipGetErrorString(status));
+        }
+        HIP_ASSERT(hipDeviceSynchronize());
+    }
+
 }

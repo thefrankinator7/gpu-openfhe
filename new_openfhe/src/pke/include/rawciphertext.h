@@ -12,10 +12,25 @@ struct RawCipherText {
   Ciphertext<DCRTPoly> originalCipherText; // Original CipherText object from OpenFHE;
   uint64_t* sub_0; // pointer to sub-ciphertext 0
   uint64_t* sub_1; // pointer to sub-ciphertext 1
+  uint64_t* sub_2; // pointer to sub-ciphertext 1
   uint64_t* moduli; // moduli for each limb
   int numRes; // number of residues of ciphertext, length of moduli array and first dimension of sub-ciphertexts
   int N; // length of each polynomial
   Format format; // current format of ciphertext, either coefficient or evaluation
+};
+
+/**
+* parameter structure for doing the NTT on the GPU in RNS format
+*/
+struct NTT_params {
+    int N;
+    int L;
+    int qbit;
+    int logN;
+    uint64_t* moduli;
+    uint64_t* mus;
+    uint64_t* psi_arrays;
+    uint64_t* inv_psi_arrays;
 };
 
 
@@ -97,6 +112,7 @@ void MoveToGPU(RawCipherText* ct) {
     int numElems=ct->N * ct->numRes;
     ct->sub_0=moveArrayToGPU(ct->sub_0, numElems);
     ct->sub_1=moveArrayToGPU(ct->sub_1, numElems);
+    ct->sub_2=moveArrayToGPU(ct->sub_1, numElems);
     ct->moduli=moveArrayToGPU(ct->moduli, ct->numRes);
 };
 
@@ -107,6 +123,7 @@ void MoveToHost(RawCipherText* ct) {
     int numElems=ct->N * ct->numRes;
     ct->sub_0=moveArrayToHost(ct->sub_0, numElems);
     ct->sub_1=moveArrayToHost(ct->sub_1, numElems);
+    ct->sub_2=moveArrayToHost(ct->sub_2, numElems);
     ct->moduli=moveArrayToHost(ct->moduli, ct->numRes);
 };
 
@@ -116,23 +133,68 @@ void MoveToHost(RawCipherText* ct) {
 void EvalAddGPU(RawCipherText* ct1, RawCipherText* ct2) {
     gpuAdd(ct1->sub_0, ct2->sub_0, ct1->sub_0, ct1->N, ct1->numRes, ct1->moduli);
     gpuAdd(ct1->sub_1, ct2->sub_1, ct1->sub_1, ct1->N, ct1->numRes, ct1->moduli);
-    hipSync();
+    //hipSync();
 };
 
 
-// void EvalMultGPUNoRelin(RawCipherText* ct1, RawCipherText* ct2) {
+void EvalMultGPUNoRelin(RawCipherText* ct1, RawCipherText* ct2) {
 
-//     gpuMult(ct1->sub_0, ct2->sub_1, ct1->sub_2, ct1->N, ct1->numRes, ct1->moduli);
-//     gpuMult(ct1->sub_1, ct2->sub_0, ct2->sub_2, ct1->N, ct1->numRes, ct1->moduli);
+    gpuMult(ct1->sub_0, ct2->sub_1, ct1->sub_2, ct1->N, ct1->numRes, ct1->moduli);
+    gpuMult(ct1->sub_1, ct2->sub_0, ct2->sub_2, ct1->N, ct1->numRes, ct1->moduli);
 
-//     gpuMult(ct1->sub_0, ct2->sub_0, ct1->sub_0, ct1->N, ct1->numRes, ct1->moduli);
-//     gpuMult(ct1->sub_1, ct2->sub_1, ct1->sub_2, ct1->N, ct1->numRes, ct1->moduli);
+    gpuMult(ct1->sub_0, ct2->sub_0, ct1->sub_0, ct1->N, ct1->numRes, ct1->moduli);
+    gpuMult(ct1->sub_1, ct2->sub_1, ct1->sub_2, ct1->N, ct1->numRes, ct1->moduli);
 
-//     gpuAdd(ct1->sub_2,ct2->sub_2, ct1->sub_1,ct1->N,ct1->numRes,ct1->moduli);
-//     hipSync();
-// }
+    gpuAdd(ct1->sub_2,ct2->sub_2, ct1->sub_1,ct1->N,ct1->numRes,ct1->moduli);
+    // hipSync();
+}
 
+NTT_params get_NTT_params(RawCipherText* ct1, int logN, int qbit) {
+    NTT_params params;
+    params.N=ct1->N;
+    params.L=ct1->numRes;
+    params.qbit = qbit;
+    params.logN = logN;
+    params.moduli=moveArrayToGPU(ct1->moduli, params.L);
 
+    params.mus= (uint64_t*)malloc(sizeof(uint64_t)*params.L);
+    params.psi_arrays = (uint64_t*)malloc(sizeof(uint64_t) * params.N * params.L);
+    params.inv_psi_arrays = (uint64_t*)malloc(sizeof(uint64_t) * params.N * params.L);
+
+    uint64_t psi;
+    for (int i=0; i<params.L; i++) {
+        params.mus[i]=((__uint128_t)1<<(2*params.qbit)+1) / ct1->moduli[i];
+        psi = gen_primitive_root(2*params.N, ct1->moduli[i]);
+        generate_psi_array(params.psi_arrays+ i * params.N, psi, ct1->moduli[i], logN);
+        generate_invpsi_array(params.inv_psi_arrays + i * params.N, psi, ct1->moduli[i], logN);
+    }
+    
+    params.mus= moveArrayToGPU(params.mus, params.L);
+    params.psi_arrays = moveArrayToGPU(params.psi_arrays, params.N * params.L);
+    params.inv_psi_arrays = moveArrayToGPU(params.inv_psi_arrays, params.N * params.L);
+
+    return params;
+}
+
+void GPU_NTT(RawCipherText* ct1, NTT_params params) {
+    if (ct1->format==EVALUATION) {
+        std::cout << "Already in Evaluation Format" << std::endl;
+        return;
+    }
+    gpuNTT(ct1->sub_0, params.psi_arrays, params.logN, params.N, params.L, params.moduli, params.mus, params.qbit);
+    gpuNTT(ct1->sub_1, params.psi_arrays, params.logN, params.N, params.L, params.moduli, params.mus, params.qbit);
+    ct1->format = EVALUATION;
+}
+
+void GPU_INTT(RawCipherText* ct1, NTT_params params) {
+    if (ct1->format==COEFFICIENT) {
+        std::cout << "Already in Coefficient Format" << std::endl;
+        return;
+    }
+    gpuINTT(ct1->sub_0, params.inv_psi_arrays, params.logN, params.N, params.L, params.moduli, params.mus, params.qbit);
+    gpuINTT(ct1->sub_1, params.inv_psi_arrays, params.logN, params.N, params.L, params.moduli, params.mus, params.qbit);
+    ct1->format = COEFFICIENT;
+}
 /**
 * Evaluates homomorphic multiplication on the GPU
 * does not include relinearization and rescaling */

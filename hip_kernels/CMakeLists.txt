@@ -5,7 +5,7 @@ enable_language(HIP)
 
 include_directories(include)
 
-set (SOURCE_FILES gpu_functions.hip gpu_functions.h)
+set (SOURCE_FILES gpu_functions.hip gpu_functions.h src/debugger.hip src/functions.hip src/gpu_functions.hip)
 add_library(gpu_funcs STATIC ${SOURCE_FILES})
 add_executable(test_gpu test_gpu_kernels.hip gpu_functions.hip)
 target_compile_options(gpu_funcs PUBLIC -fPIC)
